@@ -1,0 +1,41 @@
+(GRU_LS) C:\Users\qiant\Desktop\GCNN_LS>python phase_1_layers_representational_alignment.py
+N=10 L=12:   0%|                                                                 | 0/9 [00:00<?, ?it/s]  reached 95.0% at epoch 850
+  reached 96.0% at epoch 60
+N=10 L=12:  11%|██████▎                                                  | 1/9 [01:01<08:10, 61.35s/it]  reached 96.1% at epoch 190
+  reached 95.5% at epoch 80
+N=10 L=12:  22%|████████████▋                                            | 2/9 [01:42<05:47, 49.65s/it]  reached 95.0% at epoch 1040
+  reached 97.7% at epoch 70
+N=10 L=12:  33%|███████████████████                                      | 3/9 [02:57<06:07, 61.18s/it]  reached 96.1% at epoch 290
+  reached 96.6% at epoch 70
+N=10 L=12:  44%|█████████████████████████▎                               | 4/9 [03:39<04:27, 53.56s/it]  reached 95.8% at epoch 230
+  reached 97.2% at epoch 60
+N=10 L=12:  56%|███████████████████████████████▋                         | 5/9 [04:15<03:08, 47.08s/it]  reached 95.6% at epoch 190
+  reached 95.9% at epoch 40
+N=10 L=12:  67%|██████████████████████████████████████                   | 6/9 [04:40<01:59, 39.82s/it]  reached 95.0% at epoch 600
+  reached 95.2% at epoch 180
+N=10 L=12:  78%|████████████████████████████████████████████▎            | 7/9 [06:20<01:58, 59.42s/it]  reached 95.1% at epoch 550
+  reached 96.7% at epoch 80
+N=10 L=12:  89%|██████████████████████████████████████████████████▋      | 8/9 [07:17<00:58, 58.74s/it]  reached 95.2% at epoch 270
+  reached 96.6% at epoch 60
+N=10 L=12: 100%|█████████████████████████████████████████████████████████| 9/9 [07:54<00:00, 52.77s/it]
+N=250 L=2:   0%|                                                                 | 0/9 [00:00<?, ?it/s]  reached 95.1% at epoch 540
+  reached 95.4% at epoch 110
+N=250 L=2:  11%|██████▎                                                  | 1/9 [01:15<10:07, 75.91s/it]  reached 95.0% at epoch 590
+  reached 95.8% at epoch 110
+N=250 L=2:  22%|████████████▋                                            | 2/9 [02:34<09:02, 77.48s/it]  reached 95.0% at epoch 540
+  reached 95.7% at epoch 100
+N=250 L=2:  33%|███████████████████                                      | 3/9 [03:46<07:29, 74.89s/it]  reached 95.0% at epoch 510
+  reached 95.0% at epoch 100
+N=250 L=2:  44%|█████████████████████████▎                               | 4/9 [04:56<06:04, 72.99s/it]  reached 95.1% at epoch 560
+  reached 96.7% at epoch 100
+N=250 L=2:  56%|███████████████████████████████▋                         | 5/9 [06:08<04:51, 72.79s/it]  reached 95.2% at epoch 530
+  reached 95.1% at epoch 110
+N=250 L=2:  67%|██████████████████████████████████████                   | 6/9 [07:24<03:40, 73.61s/it]  reached 95.2% at epoch 570
+  reached 95.0% at epoch 100
+N=250 L=2:  78%|████████████████████████████████████████████▎            | 7/9 [08:36<02:26, 73.36s/it]  reached 95.0% at epoch 530
+  reached 95.9% at epoch 110
+N=250 L=2:  89%|██████████████████████████████████████████████████▋      | 8/9 [09:52<01:13, 73.98s/it]  reached 95.3% at epoch 580
+  reached 96.0% at epoch 110
+N=250 L=2: 100%|█████████████████████████████████████████████████████████| 9/9 [11:10<00:00, 74.45s/it]
+width=10,  depth=12,  RA = 0.600  KA = 0.249  (avg of 9)
+width=250, depth=2,   RA = 0.731  KA = 0.550  (avg of 9)
