@@ -1,6 +1,15 @@
 import math, random, argparse, numpy as np, torch, torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import trange
+import os
+
+# -------------- checkpoint helper -----------------------------------
+CHK_DIR = "models"                 # top-level folder for weights
+os.makedirs(CHK_DIR, exist_ok=True)
+
+def save_ckpt(net, width, depth, seed):
+    path = f"{CHK_DIR}/net_w{width}_L{depth}_seed{seed}.pt"
+    torch.save(net.state_dict(), path)
 
 # ----------------------------- data ---------------------------------
 TOTAL_PTS, TRAIN_SPLIT = 40_000, 0.9
@@ -211,14 +220,21 @@ def run(width, depth, trials=9, batch=8192):
     for s in trange(trials, desc=f"N={width} L={depth}"):
         torch.manual_seed(s); np.random.seed(s); random.seed(s)
         net = FC(width, depth)
-        #RA.append(rep_align(net, test_loader))
         RA_i = layerwise_RA(net, test_loader)   # list[L]
+        save_ckpt(net, width, depth, s)
         RA.append(np.mean(RA_i))                # ← average over layers
         torch.cuda.empty_cache()
         torch.manual_seed(s); np.random.seed(s); random.seed(s)
+        ##################################################################
+        #net = FC(width, depth)
+        #KA_i = layerwise_KA(net, train_loader)  # list[L]
+        ##################################################################
         net = FC(width, depth)
-        #KA.append(tk_align(net, train_loader))
-        KA_i = layerwise_KA(net, train_loader)  # list[L]
+        net.load_state_dict(torch.load(
+            f"{CHK_DIR}/net_w{width}_L{depth}_seed{s}.pt"))
+        net.eval()
+        KA_i = layerwise_KA(net, train_loader)  # re-uses saved weights
+        ##################################################################
         KA.append(np.mean(KA_i))
         torch.cuda.empty_cache()
     return np.mean(RA), np.mean(KA)
