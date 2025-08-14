@@ -42,6 +42,7 @@ class FC(nn.Module):
         if grad: return self.out(x)      # to take gradient wrt params
         return torch.tanh(self.out(x))
 
+'''
 # ---------------------     NEW: depth × width scaling    ---------------------
 def per_layer_lr(layer, base_lr, depth):
     """
@@ -61,6 +62,30 @@ def make_optim(net, base_lr, depth):
     for mod in net.modules():
         if isinstance(mod, nn.Linear):
             lr = per_layer_lr(mod, base_lr, depth)
+            param_groups.append({"params": [mod.weight], "lr": lr})
+            if mod.bias is not None:
+                param_groups.append({"params": [mod.bias], "lr": lr})
+    return torch.optim.SGD(param_groups, momentum=0.0)
+'''
+# --------------------- depth × width scaling (parametrized) ---------------------
+def per_layer_lr(layer, base_lr, depth, depth_exp=1.5):
+    """
+    µP / NTK rule-of-thumb:
+       lr ∝ 1 / fan_in         (width scaling)
+       lr ∝ 1 / depth^exp      (depth scaling; exp=1.5 is μP max-update; 1.0 is 'faithful')
+    """
+    fan_in = layer.weight.data.size(1)  # columns
+    return base_lr / (fan_in * (depth ** depth_exp))
+
+def make_optim(net, base_lr, depth, depth_exp=1.5):
+    """
+    Builds param groups so that each weight matrix (and matching bias)
+    gets its own learning-rate η = base_lr / (fan_in · depth^exp).
+    """
+    param_groups = []
+    for mod in net.modules():
+        if isinstance(mod, nn.Linear):
+            lr = per_layer_lr(mod, base_lr, depth, depth_exp)
             param_groups.append({"params": [mod.weight], "lr": lr})
             if mod.bias is not None:
                 param_groups.append({"params": [mod.bias], "lr": lr})
@@ -89,6 +114,29 @@ def train(net, loader, lr=0.05, epochs=200):
             opt.zero_grad(); mse(net(x),y).backward(); opt.step()
 '''
 
+# --------------------- trainer (loss-threshold) ---------------------
+def train_until_loss(net, loader, loss_target, max_epochs, base_lr, depth, depth_exp=1.5):
+    opt = make_optim(net, base_lr, depth, depth_exp)
+    mse = nn.MSELoss()
+    for epoch in range(1, max_epochs + 1):
+        net.train()
+        for x, y in loader:
+            opt.zero_grad()
+            loss = mse(net(x), y)
+            loss.backward()
+            opt.step()
+        # check mean train loss every epoch (cheap in this small setup)
+        with torch.no_grad():
+            tot = 0.0
+            cnt = 0
+            for x, y in loader:
+                l = mse(net(x), y)
+                tot += l.item() * y.size(0)
+                cnt += y.size(0)
+        if (tot / cnt) <= loss_target:
+            return epoch
+    return max_epochs
+
 def train_to_acc(net, loader, target=0.95, max_epochs=2000, base_lr=0.05, depth=1):
     """
     SGD until training accuracy ≥ target (default 90 %) or max_epochs reached.
@@ -114,7 +162,8 @@ def train_to_acc(net, loader, target=0.95, max_epochs=2000, base_lr=0.05, depth=
 #    return mat.T @ mat
 
 # ---------------------     NEW: robust Gram operator     ---------------------
-def gram(X, *, centre=False, l2_normalise=False):
+'''
+def gram(X, *, centre=True, l2_normalise=True):
     """
     Returns K = Φ Φᵀ with:
        • optional centring  : x ← x − mean(x)
@@ -125,6 +174,11 @@ def gram(X, *, centre=False, l2_normalise=False):
     if l2_normalise:
         X = X / (X.norm(dim=1, keepdim=True) + 1e-9)
     return X @ X.T
+'''
+def gram(X, *, centre=False):      # default False to match Eq. (5)
+    if centre:
+        X = X - X.mean(dim=0, keepdim=True)
+    return X @ X.T
 
 def frob(A):                          # Frobenius norm
     return torch.norm(A, p='fro')
@@ -132,12 +186,14 @@ def frob(A):                          # Frobenius norm
 def alignment(GT, G0):                # trace(GT G0)/||·||/||·||
     return torch.trace(GT @ G0) / (frob(GT)*frob(G0) + 1e-8)
 
+'''
 def rep_align(net, loader_probe, loader_train, *, base_lr=0.05):
     with torch.no_grad():
         H0 = torch.cat([net(x, hid=True) for x, _ in loader_probe], 0)
     R0 = gram(H0)
 
-    train_to_acc(net, loader_train, depth=net.depth, base_lr=base_lr)
+    #train_to_acc(net, loader_train, depth=net.depth, base_lr=base_lr)
+
 
     with torch.no_grad():
         HT = torch.cat([net(x, hid=True) for x, _ in loader_probe], 0)
@@ -153,9 +209,9 @@ def tk_align(net, loader_probe, loader_train, *, subset=512, base_lr=0.05):
     params = [p for p in net.parameters() if p.requires_grad]
     def flat_grad(x):
         net.zero_grad()
-        y = net(x.unsqueeze(0), grad=True)
+        y = net(x.unsqueeze(0))         # use the trained output (with tanh)
         g = torch.autograd.grad(y, params, retain_graph=True)
-        return torch.cat([gi.view(-1) for gi in g])
+        return torch.cat([gi.reshape(-1) for gi in g])
 
     # initial NTK
     G0 = torch.stack([flat_grad(x) for x in xb])
@@ -226,7 +282,102 @@ def layerwise_KA(net, loader_probe, loader_train,
         KA_i  = alignment(KT_i, K0_i)
         KA.append(KA_i.item())
     return KA
+'''
+# --------------------- representation alignment ---------------------
+def rep_align(net, loader_probe, loader_train,
+              *, base_lr=0.05, loss_target=0.03, max_epochs=2000, depth_exp=1.5):
+    with torch.no_grad():
+        H0 = torch.cat([net(x, hid=True) for x, _ in loader_probe], 0)
+    R0 = gram(H0)
 
+    train_until_loss(net, loader_train, loss_target, max_epochs, base_lr, net.depth, depth_exp)
+
+    with torch.no_grad():
+        HT = torch.cat([net(x, hid=True) for x, _ in loader_probe], 0)
+    RT = gram(HT)
+    return alignment(RT, R0).item()
+
+# --------------------- full-NTK alignment ---------------------
+def tk_align(net, loader_probe, loader_train,
+             *, subset=512, base_lr=0.05, loss_target=0.03, max_epochs=2000, depth_exp=1.5):
+    # pick a subset from the probe data
+    xb, _ = next(iter(DataLoader(loader_probe.dataset,
+                                 batch_size=subset, shuffle=True)))
+
+    params = [p for p in net.parameters() if p.requires_grad]
+
+    def flat_grad(x):
+        net.zero_grad()
+        y = net(x.unsqueeze(0))     # use actual trained output
+        y = y.sum()                  # make scalar for autograd.grad
+        g = torch.autograd.grad(y, params, retain_graph=True)
+        return torch.cat([gi.reshape(-1) for gi in g])
+
+    # initial NTK
+    G0 = torch.stack([flat_grad(x) for x in xb])
+    K0 = gram(G0)
+
+    # train to loss threshold
+    train_until_loss(net, loader_train, loss_target, max_epochs, base_lr, net.depth, depth_exp)
+
+    # trained NTK
+    GT = torch.stack([flat_grad(x) for x in xb])
+    KT = gram(GT)
+    return alignment(KT, K0).item()
+
+# --------------------- layer-wise RA ---------------------
+def layerwise_RA(net, loader_probe, loader_train,
+                 *, base_lr=0.05, loss_target=0.03, max_epochs=2000, depth_exp=1.5):
+    layer_buffers = [[] for _ in net.hid]
+    hooks = [m.register_forward_hook(
+             lambda m, _, o, idx=i: layer_buffers[idx].append(o.detach()))
+             for i, m in enumerate(net.hid)]
+
+    with torch.no_grad():
+        for xb, _ in loader_probe:
+            net(xb)
+    acts_init = [torch.cat(buf, 0) for buf in layer_buffers]
+
+    train_until_loss(net, loader_train, loss_target, max_epochs, base_lr, net.depth, depth_exp)
+
+    for buf in layer_buffers: buf.clear()
+    with torch.no_grad():
+        for xb, _ in loader_probe:
+            net(xb)
+    acts_tr = [torch.cat(buf, 0) for buf in layer_buffers]
+    [h.remove() for h in hooks]
+
+    return [alignment(gram(Ht), gram(H0)) for H0, Ht in zip(acts_init, acts_tr)]
+
+# --------------------- layer-wise KA ---------------------
+def layerwise_KA(net, loader_probe, loader_train,
+                 *, subset=512, base_lr=0.05, loss_target=0.03, max_epochs=2000, depth_exp=1.5):
+    xb, _ = next(iter(DataLoader(loader_probe.dataset,
+                                 batch_size=subset, shuffle=True)))
+    params = [p for p in net.parameters() if p.requires_grad]
+    slices = np.cumsum([0] + [p.numel() for p in params])
+
+    def flat_grad(x):
+        net.zero_grad()
+        y = net(x.unsqueeze(0))     # match training output
+        y = y.sum()                  # scalar
+        g = torch.autograd.grad(y, params, retain_graph=True)
+        return torch.cat([gi.reshape(-1) for gi in g])
+
+    G0 = torch.stack([flat_grad(x) for x in xb])
+
+    train_until_loss(net, loader_train, loss_target, max_epochs, base_lr, net.depth, depth_exp)
+
+    GT = torch.stack([flat_grad(x) for x in xb])
+
+    KA = []
+    for i in range(len(slices) - 1):
+        s, e  = slices[i], slices[i + 1]
+        K0_i  = G0[:, s:e] @ G0[:, s:e].T
+        KT_i  = GT[:, s:e] @ GT[:, s:e].T
+        KA_i  = alignment(KT_i, K0_i)
+        KA.append(KA_i.item())
+    return KA
 # ------------------------ experiment --------------------------------
 '''
 def run(width, depth, trials=9, batch=8192):
@@ -255,6 +406,7 @@ def run(width, depth, trials=9, batch=8192):
         KA.append(np.mean(KA_i))
         torch.cuda.empty_cache()
     return np.mean(RA), np.mean(KA)
+'''
 '''
 def run(width, depth, trials=9, batch=8192,
         base_lr=0.05, layerwise=False):
@@ -300,9 +452,63 @@ def run(width, depth, trials=9, batch=8192,
         return headline_RA, headline_KA, mean_RA_profile, mean_KA_profile
     else:
         return headline_RA, headline_KA
+'''
+def run(width, depth, trials=9, batch=8192,
+        base_lr=0.05, layerwise=False,
+        loss_target=0.03, max_epochs=2000, depth_exp=1.5):
+    (xt, yt), (xe, ye) = make_circle()
+    loader_train = DataLoader(TensorDataset(xt, yt), batch, shuffle=True)
+    loader_probe = DataLoader(TensorDataset(xe, ye), batch, shuffle=False)
+
+    RA_all, KA_all = [], []
+    RA_layers, KA_layers = [], []
+
+    for s in trange(trials, desc=f"W={width}  L={depth}"):
+        torch.manual_seed(s); np.random.seed(s); random.seed(s)
+
+        # ---------- build and save fresh model ----------
+        net = FC(width, depth)
+        save_ckpt(net, width, depth, s)
+
+        # ---------- representation alignment ----------
+        if layerwise:
+            RA_i = layerwise_RA(net, loader_probe, loader_train,
+                                base_lr=base_lr, loss_target=loss_target,
+                                max_epochs=max_epochs, depth_exp=depth_exp)
+            RA_layers.append(RA_i)
+            RA_all.append(np.mean(RA_i))
+        else:
+            RA_all.append(rep_align(net, loader_probe, loader_train,
+                                    base_lr=base_lr, loss_target=loss_target,
+                                    max_epochs=max_epochs, depth_exp=depth_exp))
+
+        # ---------- tangent‑kernel alignment ----------
+        net.load_state_dict(torch.load(
+            f"{CHK_DIR}/net_w{width}_L{depth}_seed{s}.pt"))
+        net.eval()
+        if layerwise:
+            KA_i = layerwise_KA(net, loader_probe, loader_train,
+                                base_lr=base_lr, loss_target=loss_target,
+                                max_epochs=max_epochs, depth_exp=depth_exp)
+            KA_layers.append(KA_i)
+            KA_all.append(np.mean(KA_i))
+        else:
+            KA_all.append(tk_align(net, loader_probe, loader_train,
+                                   base_lr=base_lr, loss_target=loss_target,
+                                   max_epochs=max_epochs, depth_exp=depth_exp))
+
+    headline_RA = np.mean(RA_all)
+    headline_KA = np.mean(KA_all)
+
+    if layerwise:
+        mean_RA_profile = np.mean(RA_layers, axis=0)
+        mean_KA_profile = np.mean(KA_layers, axis=0)
+        return headline_RA, headline_KA, mean_RA_profile, mean_KA_profile
+    else:
+        return headline_RA, headline_KA
 
 
-
+'''
 if __name__ == "__main__":
     torch.set_grad_enabled(True)           # NTK needs grads
     #ra_rich, ka_rich = run(10, 12)
@@ -315,7 +521,7 @@ if __name__ == "__main__":
     #ra_wide, ka_wide, ra_prof_wide, ka_prof_wide = run(width=250, depth=2, layerwise=True)
     #print("layer‑wise RA:", ra_prof_wide)
     #print("layer‑wise KA:", ka_prof_wide)
-
+'''
 
 # W = 10, L = 2
 # layer‑wise RA: [0.9710357 0.8229258]
@@ -333,3 +539,17 @@ if __name__ == "__main__":
 # layer‑wise RA: [0.9910052  0.9212354  0.82818174 0.6983849 ]
 # layer‑wise KA: [0.79621189 0.77488117 0.78056735 0.87252767 0.69415596 0.94384767
 # 0.65240953 0.98345986 0.54127032 1.        ]
+
+
+
+
+if __name__ == "__main__":
+    torch.set_grad_enabled(True)
+    ra_narrow, ka_narrow, ra_prof_narrow, ka_prof_narrow = run(
+        width=50, depth=4, layerwise=True,
+        loss_target=0.03,    # try 0.05 → 0.02 to calibrate
+        max_epochs=2000,
+        depth_exp=1.5        # 1.5 for μP-style depth scaling; 1.0 for 'faithful'
+    )
+    print("layer‑wise RA:", ra_prof_narrow)
+    print("layer‑wise KA:", ka_prof_narrow)
